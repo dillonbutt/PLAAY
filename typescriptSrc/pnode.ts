@@ -335,7 +335,7 @@ module pnode {
 
 
 
-    export class VarLabel implements ExprLabel {//TODO change name(and isValid) Will be callWorld?
+    export class VarLabel implements ExprLabel {//TODO change name(and isValid)
 
         isValid(children:Array<PNode>):boolean {
             if (children.length == 0) return false;
