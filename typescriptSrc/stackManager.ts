@@ -1,9 +1,11 @@
 
 import evaluation = require( './evaluation' ) ;
+import value = require( './value')
 
 module stack {
 
     import Evaluation = evaluation.Evaluation;
+    import Value = value.Value;
 
     export class Stack {
 
@@ -18,14 +20,14 @@ module stack {
             this.head = val;
         }
 
-        pop() : Evaluation{
-            var it = this.head;
+        pop() : Value{
+            var it = this.head.getVarMap().getValue();
             this.head = this.head.getNext();
             return it;
         }
 
-        top() : Evaluation{
-            return this.head;
+        top() : Value{
+            return this.head.getVarMap().getValue();
         }
 
         public notEmpty() : boolean{
