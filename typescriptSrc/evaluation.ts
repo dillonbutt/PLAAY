@@ -42,8 +42,8 @@ module evaluation {
             this.next = next;
         }
 
-        setResult(value : Evaluation ){
-            this.varmap.setName(value.getVarMap().getName());
+        setResult(value : Value ){
+
             this.varmap.setValue(value.getVarMap().getValue());
         }
         setVarMap(map : VarMap){
