@@ -24,7 +24,7 @@ module value {
             this.name = name;
             this.value = value;
             this.type = type;
-            this. isConstant = isConstant;
+            this.isConstant = isConstant;
         }
 
         // getters and setters
