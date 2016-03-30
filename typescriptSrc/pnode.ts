@@ -999,7 +999,7 @@ module pnode {
                         var c = <ClosureV>field.getValue;
                        // if (!c.isClosureV()){}//  error!
                         var c1 = <ClosureV>c;
-                        var f : LambdaNode = <LambdaNode>c1.function;
+                        var f : LambdaNode = <LambdaNode>c.function;
 
                         //a bunch of pNodes(non parameter children)
                         var argList : Array<Value> = new Array();
