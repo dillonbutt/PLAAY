@@ -1,101 +1,158 @@
 /// <reference path="assert.ts" />
 /// <reference path="collections.ts" />
+/// <reference path="valueTypes.ts" />
+/// <reference path="vms.ts" />
 
-import collections = require( './collections' ) ;
 import assert = require( './assert' ) ;
+import collections = require( './collections' ) ;
+import valueTypes = require( './valueTypes' ) ;
 import vms = require('./vms' ) ;
-import evaluation = require('./evaluation') ;
-import stack = require( './stackManager' ) ;
-import value = require('./value') ;
 
-
+/** Module pnode contains the PNode class and the implementations of the labels. */
 module pnode {
     import Option = collections.Option;
     import Some = collections.Some;
     import None = collections.None;
+    import none = collections.none;
+    import some = collections.some;
     import VMS = vms.VMS;
-    import Evaluation = evaluation.Evaluation;
-    import Stack = stack.Stack;
-    import execStack = stack.execStack;
-    import Value = value.Value;
-    import BuiltInV = value.BuiltInV;
-    import varMap = stack.VarMap;
-    import Field = value.Field;
-    import ClosureV = value.ClosureV;
-    import StringV = value.StringV;
+    import Evaluation = vms.Evaluation;
+    import VarStack = vms.VarStack;
+    import EvalStack = vms.EvalStack;
+    import Value = vms.Value;
+    import BuiltInV = valueTypes.BuiltInV;
+    import ValueMap = vms.ValueMap;
+    import FieldI = vms.FieldI ;
+    import Field = valueTypes.Field;
+    import ClosureV = valueTypes.ClosureV;
+    import StringV = valueTypes.StringV;
     import arrayToList = collections.arrayToList;
-    import Type = value.Type;
-    import ObjectV = value.ObjectV;
-
-
+    import Type = vms.Type;
+    import ObjectV = valueTypes.ObjectV;
 
     export interface nodeStrategy {
         select( vms : VMS, label:Label ) : void;
     }
 
+
+    /** Labels are used to label PNodes. Like PNodes, Labels are immutable objects. */
     export interface Label {
         isValid : (children:Array<PNode>) => boolean ;
         strategy:nodeStrategy;
         step : (vms:VMS) => void;
-        /** Returns the class that uses this sort of label */
-        getClass : () => PNodeClass ;
 
-        getVal : () => string ;
-        changeValue:(newString : string) => Option<Label> ;
+        /** Get the string value associated with the node, if there is one.
+         * For example for variables, this would be the name of the variable.
+         * Labels that don't have a string associated with them must return null.
+         * Labels that do must not return null .
+         * TODO:  Better to return an option.
+         * TODO: Change name to getString.
+         */
+        getVal : () => string ; 
 
+        /** Labels with string values can be open or closed.
+         * When open they display in a way that permits the string value to be edited.
+         * Labels that don't have a string associated with them should return None.
+         * Labels that do have a string associated with them should return Some.
+         */
+        isOpen : () => boolean ;
+
+        /** Attempt to open the label.
+         * Labels that don't have a string associated with them should return None. 
+         * Labels that don't have a string associated with them should return Some with
+         * an argument that is open. 
+         */
+        open : () => Option<Label> ; 
+
+        /** Possibly change the string value associated with this label. 
+         * The argument must not be null!
+         * Labels that don't have a string associated with them should return None.
+         * Labels that do have a string associated with them should return Some unless
+         * there is a validity problem. E.g. the string associated with a number should be
+         * properly formatted.  If it returns Some, the new label should be closed.
+        */
+        changeString : (newString : string) => Option<Label> ;
+
+        /** Convert the label to an object that we can put out as JSON.
+         * This object must of a "kind" field and the value of that field must be the name of the 
+         * concrete class that implements Label.
+         * 
+         * Each concrete class implementing Label must also have a public
+         * static method called fromJSON which takes an object such as the one returned from toJSON.*/
         toJSON : () => any ;
+
+        /** Is this label a label for an expression node? */
+        isExprNode : () => boolean ;
+
+        /** Is this label a label for an expression sequence node? */
+        isExprSeqNode : () => boolean ;
+
+        /** Is this label a label for a type node node? */
+        isTypeNode : () => boolean ;
+
+        isPlaceHolder : () => boolean ;
+
+        hasDropZonesAt : (start : number) => boolean ;
     }
 
-    /**  Interface is to describe objects that are classes that are subclasses of PNode
-     * and can have constructors that can take the parameters below.*/
-    export interface PNodeClass {
-        new(label:Label, children:Array<PNode>) : PNode ;
-    }
-
-    export abstract class PNode {
+    /** PNodes are abstract syntax trees for the PLAAY language.
+     * Each PNode consists of a Label and a sequence of 0 or more children.
+     * 
+     * PNodes are immutable objects.
+     * 
+     * Each PNode represents a valid tree in the sense that, if `l` is its label
+     * and `chs` is an array of its children, then `l.isValid(chs)` must be true.
+    */
+    export class PNode {
         private _label:Label;
         private _children:Array<PNode>;
 
         /** Construct a PNode.
-         *  Precondition: label.isValid( children )
+         *  recondition: label.isValid( children )
          * @param label A Label for the node.
          * @param children: A list (Array) of children
          */
-        /*protected*/
         constructor(label:Label, children:Array<PNode>) {
             //Precondition  would not need to be checked if the constructor were private.
             assert.check(label.isValid(children),
                 "Attempted to make an invalid program node");
             this._label = label;
-            this._children = children.slice();
+            this._children = children.slice();  // Must make copy to ensure immutability.
         }
 
+        /** How many children. */
         public count():number {
             return this._children.length;
         }
 
+        /** Get some of the children as an array. */
         public children(start:number, end:number):Array<PNode> {
             if (start === undefined) start = 0;
             if (end === undefined) end = this._children.length;
+            assert.checkPrecondition( 0 <= start && start <= this.count() ) ;
+            assert.checkPrecondition( 0 <= end && end <= this.count() ) ;
             return this._children.slice(start, end);
         }
 
+        /** Get one child. */
         public child(i:number):PNode {
-            assert.check( 0 <= i && i < this.count() ) ;
+            assert.checkPrecondition( 0 <= i && i < this.count() ) ;
             return this._children[i];
         }
 
+        /** Get the label. */
         public label():Label {
             return this._label;
         }
 
-        //return the node at the path
+        /* Return the node at the path */
         public get(path : collections.List<number> | Array<number> ) : PNode {
+            // TODO. Do we really need to be able to pass in an array?
              if( path instanceof Array ) 
                  return this.listGet( collections.arrayToList( path ) ) ;
              else if( path instanceof collections.List ) {
                 return this.listGet( path ) ; }
-             else { assert.check( false, "Unreachable") ; return null ; }
+             else { assert.checkPrecondition( false, "Bad path argument.") ; return null ; }
         }
 
         private listGet(path : collections.List<number> ) : PNode {
@@ -106,12 +163,14 @@ module pnode {
 
         /** Possibly return a copy of the node in which the children are replaced.
          * The result will have children
+         * ~~~
          *    [c[0], c[1], c[start-1]] ++ newChildren ++ [c[end], c[end+1], ...]
-         * where c is this.children().
-         * I.e. the segment c[ start,.. end] is replaced by newChildren.
+         * ~~~
+         * where `c` is `this.children()`.
+         * I.e. the segment `c[ start,.. end]` is replaced by `newChildren`.
          * The method succeeds iff the node required to be constructed would be valid.
-         * Node that start and end can be number value including negative.
-         * Negative numbers k are treated as length + k, where length
+         * Node that start and end can be any number value including negative.
+         * Negative numbers `k` are treated as `length + k`, where `length`
          * is the number of children.
          * @param newChildren An array of children to be added
          * @param start The first child to omit. Default 0.
@@ -132,7 +191,7 @@ module pnode {
         /** Would tryModify succeed?
          */
         public canModify(newChildren:Array<PNode>, start:number, end:number):boolean {
-            return !this.tryModify(newChildren, start, end).isEmpty();
+            return ! this.tryModify(newChildren, start, end).isEmpty();
         }
 
         /** Return a copy of the node in which the children are replaced.
@@ -148,30 +207,43 @@ module pnode {
                 })
         }
 
+        /** Attempt to change the label at the root of this tree.
+         * @Returns Either Some(t) where t is a tree with a new label or returns None, if such a tree is not valid.
+         */
         public tryModifyLabel(newLabel:Label):Option<PNode> {
             return tryMake(newLabel, this._children);
         }
 
+        /** Can the label be modified. See tryModifyLabel. */
         public canModifyLabel(newLabel:Label):boolean {
             return !this.tryModifyLabel(newLabel).isEmpty();
         }
 
+        /** Return a tree with a different label and the same children.
+         * 
+         * Precondition: `canModifyLabel(newLabel)`
+         */
         public modifyLabel(newLabel:Label):PNode {
             var opt = this.tryModifyLabel(newLabel);
             return opt.choose(
                 p => p,
                 () => {
-                    assert.check(false, "Precondition violation on PNode.modifyLabel");
+                    assert.checkPrecondition(false, "Precondition violation on PNode.modifyLabel");
                     return null;
                 })
         }
 
-        abstract isExprNode():boolean ;
+        public isExprNode():boolean { return this._label.isExprNode() ; }
 
-        abstract isExprSeqNode():boolean ;
+        public isExprSeqNode():boolean  { return this._label.isExprSeqNode() ; }
 
-        abstract isTypeNode():boolean ;
+        public isTypeNode():boolean  { return this._label.isTypeNode() ; }
 
+        public isPlaceHolder():boolean { return this._label.isPlaceHolder() ; }
+
+        public hasDropZonesAt(start : number):boolean { return this._label.hasDropZonesAt(start) ;}
+
+        /** Convert to a string for debugging purposes. */
         toString ():string {
             var strs = this._children.map((p:PNode) => p.toString());
             var args = strs.reduce((a:string, p:string) => a + " " + p.toString(), "");
@@ -200,33 +272,41 @@ module pnode {
     }
 
 
+    /** Try to make a PNode.
+     * @returns `Some( t )` if a valid tree can be made. `None()` otherwise.
+     */
     export function tryMake(label:Label, children:Array<PNode>):Option<PNode> {
         if (label.isValid(children)) {
             //console.log("tryMake: label is " +label+ " children.length is " +children.length ) ; 
-            const cls = label.getClass();
-            return new Some(new cls(label, children));
+            return new Some(new PNode(label, children));
         }
         else {
             return new None<PNode>();
         }
     }
 
+    /** Equivalent to `label.isValid(children)`. Also equivalent to `! tryMake(label, children).isEmpty()`.
+     */
     export function canMake(label:Label, children:Array<PNode>):boolean {
         return label.isValid(children)
     }
 
+    /** Construct a PNode.
+     * Precondition: label.isValid( children )
+     * @param label A Label for the node.
+     * @param children: A list (Array) of children
+     */
     export function make(label:Label, children:Array<PNode>):PNode {
-        const cls = label.getClass();
-        return new cls(label, children);
+        return new PNode(label, children);
     }
 
-    export function lookUp( varName : string, stack : execStack ) : Field {
+    export function lookUp( varName : string, stack : VarStack ) : FieldI {
         return stack.getField(varName);
     }
 
     export class lrStrategy implements nodeStrategy {
         select( vms : VMS, label:Label ) : void {
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
 
             if(pending != null) {
@@ -236,7 +316,7 @@ module pnode {
                     var flag = true;
                     for(var i = 0; i < node.count(); i++){
                         var p = pending.concat([i]);
-                        if(!evalu.varmap.inMap(p)){
+                        if(!evalu.map.inMap(p)){
                             flag = false;
                         }
                     }
@@ -247,12 +327,12 @@ module pnode {
                         var n;
                         for(var i = 0; i < node.count(); i++){
                             var p = pending.concat([i]);
-                            if(!evalu.varmap.inMap(p)){
+                            if(!evalu.map.inMap(p)){
                                 n = i;
                                 break;
                             }
                         }
-                        vms.stack.top().setPending(pending.concat([n]));
+                        vms.evalStack.top().setPending(pending.concat([n]));
                         node.child(n).label().strategy.select(vms, node.child(n).label() );
                     }
                 }
@@ -262,7 +342,7 @@ module pnode {
 
     export class varStrategy implements nodeStrategy {
         select( vms:VMS, label:Label ){
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if(pending != null){
                 var node = evalu.root.get(arrayToList(pending));
@@ -282,43 +362,39 @@ module pnode {
                 var childPath = path.concat([i]);
                 this.deletefromMap(vms, childPath);
             }
-            vms.getEval().getVarMap().remove(path);
+            vms.getEval().getValMap().remove(path);
 
         }
 
         select(vms:VMS, label:Label) {
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
-            if(pending != null){
-                var node = evalu.root.get(pending);
-                if(node.label() == label){
-                    var guardPath = pending.concat([0]);
-                    var loopPath = pending.concat([1]);
-                    if (evalu.varmap.inMap(guardPath)){
-                        var string = <StringV>evalu.varmap.get(guardPath);
-                        if (string.contents.match("true")){
-                            if(evalu.varmap.inMap(loopPath)){
-                                evalu.popfromStack();
-                                this.deletefromMap(vms, loopPath);
-                            }
-                            this.deletefromMap(vms, guardPath);
-                            evalu.addToStack();
-                            evalu.setPending(loopPath);
-                            node.child(1).label().strategy.select( vms, node.child(1).label() );
-                        }
-
-                        else if(string.contents.match("false")){
-                                evalu.ready = true;
-                        }
-
-                        else{
-                            throw new Error ("Error evaluating " + string.contents + " as a conditional value.") ;
-                        }
-                    }
-
-                    else{
-                        evalu.setPending(guardPath);
-                        node.child(0).label().strategy.select( vms, node.child(0).label() );
+            assert.check( pending != null ) ;
+            var node = evalu.root.get(pending);
+            let guardPath = pending.concat([0]);
+            let bodyPath = pending.concat([1]);
+            let guardMapped = evalu.map.inMap(guardPath) ;
+            let bodyMapped = evalu.map.inMap(bodyPath) ;
+            if ( guardMapped && bodyMapped ){
+                // Both children mapped; step
+                // this node.
+                evalu.ready = true;
+            } else if( guardMapped ) {
+                let value = evalu.map.get(guardPath);
+                if( ! (value instanceof StringV) ) {
+                    // TODO Fix error handling
+                    throw new Error ("Type error.  Guard of while loop must be true or false.") ;
+                } else {
+                    let strVal = <StringV> value ;
+                    let str = strVal.contents ;
+                    if( str == "true" ) {
+                        evalu.setPending(bodyPath);
+                        node.child(1).label().strategy.select( vms, node.child(1).label() );
+                    } else if( str == "false" ) {
+                        evalu.ready = true ;
+                    } else {
+                        // TODO Fix error handling
+                        throw new Error ("Type error.  Guard of while loop must be true or false.") ;
                     }
                 }
             }
@@ -328,7 +404,7 @@ module pnode {
     export class lambdaStrategy implements nodeStrategy {
 
         select(vms:VMS, label:Label) {
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if(pending != null){
                 var node = evalu.root.get(pending);
@@ -341,14 +417,14 @@ module pnode {
 
     export class assignStrategy implements nodeStrategy {
         select(vms:VMS, label:Label) {
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if (pending != null) {
                 var node = evalu.root.get(arrayToList(pending));
                 if (node.label() == label) {
                     var p = pending.concat([1]);
-                    if(!evalu.varmap.inMap(p)){
-                        vms.stack.top().setPending(p);
+                    if(!evalu.map.inMap(p)){
+                        vms.evalStack.top().setPending(p);
                         node.child(1).label().strategy.select(vms, node.child(1).label());
                     }
 
@@ -362,12 +438,12 @@ module pnode {
 
     export class LiteralStrategy implements nodeStrategy {
         select( vms:VMS, label:Label ){
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if(pending != null){
                 var node = evalu.root.get(arrayToList(pending));
                 if(node.label() == label){
-                    vms.stack.top().ready = true;
+                    vms.evalStack.top().ready = true;
                 }
             }
         }
@@ -375,7 +451,7 @@ module pnode {
 
      export class ifStrategy implements nodeStrategy {
         select( vms : VMS, label:Label){
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if(pending != null){
                 var node = evalu.root.get(pending);
@@ -383,10 +459,10 @@ module pnode {
                     var guardPath = pending.concat([0]);
                     var thenPath = pending.concat([1]);
                     var elsePath = pending.concat([2]);
-                    if (evalu.varmap.inMap(guardPath)){
-                        var string = <StringV>evalu.varmap.get(guardPath);
+                    if (evalu.map.inMap(guardPath)){
+                        var string = <StringV>evalu.map.get(guardPath);
                         if (string.contents.match("true")){
-                            if(evalu.varmap.inMap(thenPath)){
+                            if(evalu.map.inMap(thenPath)){
                                 evalu.ready = true;
                             }
                             else{
@@ -396,7 +472,7 @@ module pnode {
                         }
 
                         else if(string.contents.match("false")){
-                            if (evalu.varmap.inMap(elsePath)){
+                            if (evalu.map.inMap(elsePath)){
                                 evalu.ready = true;
                             }
 
@@ -422,17 +498,17 @@ module pnode {
 
     export class varDeclStrategy implements nodeStrategy {
         select( vms : VMS, label:Label) {
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if (pending != null) {
                 var node = evalu.root.get(pending);
                 if (node.label() == label) {
                     var nameofVar = pending.concat([0]);
                     var valueofVar = pending.concat([2]);
-                    if (evalu.varmap.inMap(nameofVar)) {
-                        var name = <StringV> evalu.varmap.get(nameofVar);
+                    if (evalu.map.inMap(nameofVar)) {
+                        var name = <StringV> evalu.map.get(nameofVar);
                         if(! lookUp(name.getVal(), evalu.getStack())) {
-                            if (evalu.varmap.inMap(valueofVar)) {
+                            if (evalu.map.inMap(valueofVar)) {
                                 evalu.ready = true;
                             } else {
                                 evalu.setPending(valueofVar);
@@ -454,13 +530,13 @@ module pnode {
 
     export class TurtleStrategy implements nodeStrategy {
         select( vms : VMS, label:Label) {
-            var evalu = vms.stack.top();
+            var evalu = vms.evalStack.top();
             var pending = evalu.getPending();
             if (pending != null) {
                 var node = evalu.root.get(pending);
                 if (node.label() == label) {
                     var value = pending.concat([0]);
-                    if (evalu.varmap.inMap(value)) {
+                    if (evalu.map.inMap(value)) {
                         evalu.ready = true;
                     }
                     else {
@@ -521,113 +597,74 @@ module pnode {
 
 
 
-
-
-
-    //Node Declarations
-
-    export class ExprNode extends PNode {
-        exprNodeTag:any // Unique field to defeat duck typing
-        // See http://stackoverflow.com/questions/34803240/requiring-argument-to-be-an-instance-of-a-subclass-of-a-given-class-in-typescr
-
-        constructor(label:Label, children:Array<PNode>) {
-            super(label, children);
-        }
-
-        isExprNode():boolean {
-            return true;
-        }
-
-        isExprSeqNode():boolean {
-            return false;
-        }
-
-        isTypeNode():boolean {
-            return false;
-        }
-    }
-
-    export class ExprSeqNode extends PNode {
-        seqNodeTag:any // Unique field to defeat duck typing
-        // See http://stackoverflow.com/questions/34803240/requiring-argument-to-be-an-instance-of-a-subclass-of-a-given-class-in-typescr
-        constructor(label:Label, children:Array<PNode>) {
-            super(label, children);
-        }
-
-        isExprNode():boolean {
-            return false;
-        }
-
-        isExprSeqNode():boolean {
-            return true;
-        }
-
-        isTypeNode():boolean {
-            return false;
-        }
-
-    }
-
-    export class TypeNode extends PNode {
-        typeNodeTag:any; // Unique field to defeat duck typing
-        // See http://stackoverflow.com/questions/34803240/requiring-argument-to-be-an-instance-of-a-subclass-of-a-given-class-in-typescr
-        constructor(label:Label, children:Array<PNode>) {
-            super(label, children);
-        }
-
-        isExprNode():boolean {
-            return false;
-        }
-
-        isExprSeqNode():boolean {
-            return false;
-        }
-
-        isTypeNode():boolean {
-            return true;
-        }
-    }
-
-    export class LambdaNode extends ExprNode {
-        constructor(label:Label, children:Array<PNode>) {
-            super(label, children);
-        }
-
-    }
-
-    //Node Labels
-    export abstract class ExprLabel implements Label {
-
-        abstract isValid(children:Array<PNode>) ;
-
-        abstract nodeStep(node:PNode, evalu:Evaluation, vms:VMS);
-
-        strategy:nodeStrategy;
-
-        getClass():PNodeClass {
-            return ExprNode;
-        }
+    /** Abstract base class for all Labels. */
+    abstract class AbstractLabel implements Label {
 
         /*private*/
         constructor() {
         }
 
-        changeValue (newString : string) : Option<Label> {
-            return new None<Label>();
-        }
-
         getVal() : string {
-            return null ;
+            return null ; }
+
+        isOpen() : boolean { return false ; }
+
+        open() : Option<Label>  { return none<Label>() ; }
+
+        changeString (newString : string) : Option<Label> {
+            return none<Label>();
         }
 
-        select(vms:VMS){
+        abstract isValid(children:Array<PNode>) : boolean ;
+
+        abstract toJSON() : any ;
+
+        /** Is this label a label for an expression node? */
+        abstract isExprNode() : boolean ;
+
+        /** Is this label a label for an expression sequence node? */
+        abstract isExprSeqNode() : boolean ;
+
+        /** Is this label a label for a type node node? */
+        abstract isTypeNode() : boolean ;
+
+
+        /** Return true if the node is a placeholder. Override this method in subclasses that are placeholders. */
+        isPlaceHolder() : boolean { return false; }
+
+        /** Return true if node has a dropzone at number. */
+        hasDropZonesAt(start : number): boolean { return false; }
+
+        // TODO Delete
+        strategy:nodeStrategy;
+
+        // TODO Delete
+        abstract step(vms:VMS) : void;
+    }
+
+
+    /** Abstract base class for all expression labels.  */
+    export abstract class ExprLabel extends AbstractLabel {
+
+
+        abstract nodeStep(node:PNode, evalu:Evaluation, vms:VMS) : void ;
+
+        strategy:nodeStrategy;
+
+        /*private*/
+        constructor() {
+            super() ;
+        }
+
+        select(vms:VMS) : void {
             this.strategy.select(vms, this);
         }
 
         //Template
-        step(vms:VMS){
-            if(vms.stack.top().ready == true){
-                var evalu = vms.stack.top();
+        step(vms:VMS) : void {
+            // TODO fix this crap.
+            if(vms.evalStack.top().ready == true){
+                var evalu = vms.evalStack.top();
                 var pending = evalu.getPending();
                 if(pending != null) {
                     var node = evalu.root.get(arrayToList(pending));
@@ -637,14 +674,20 @@ module pnode {
             }
         }
 
+        isExprNode() { return true ; }
+
+        isExprSeqNode() { return false ; }
+
+        isTypeNode() { return false ; }
+
         // Singleton
         //public static theExprLabel = new ExprLabel();
 
         abstract toJSON() : any ;
     }
 
-
-    export class ExprSeqLabel implements Label {
+    /** A sequence of expressions. */
+    export class ExprSeqLabel  extends AbstractLabel {
         isValid(children:Array<PNode>) {
             return children.every(function (c:PNode) {
                 return c.isExprNode()
@@ -660,14 +703,10 @@ module pnode {
             var thisNode = vms.getEval().getRoot().get(arrayToList(pending));
             var valpath = pending.concat([thisNode.count() - 1]);
 
-            var v = vms.getEval().varmap.get( valpath );
+            var v = vms.getEval().map.get( valpath );
 
             vms.getEval().finishStep( v );
 
-        }
-
-        getClass():PNodeClass {
-            return ExprSeqNode;
         }
 
         toString():string {
@@ -676,19 +715,20 @@ module pnode {
 
         /*private*/
         constructor() {
-        }
-
-        changeValue (newString : string) : Option<Label> {
-            return new None<Label>();
-        }
-
-        getVal() : string {
-            return null;
+            super() ;
         }
 
         select(vms:VMS){
             this.strategy.select(vms, this);
         }
+
+        isExprNode() { return false ; }
+
+        isExprSeqNode() { return true ; }
+
+        isTypeNode() { return false ; }
+
+        hasDropZonesAt(start : number): boolean { return true; }
 
         // Singleton
         public static theExprSeqLabel = new ExprSeqLabel();
@@ -698,13 +738,13 @@ module pnode {
 
         public static fromJSON( json : any ) : ExprSeqLabel {
             return ExprSeqLabel.theExprSeqLabel ; }
+ 
     }
 
-    export class ParameterListLabel implements Label {
+    /** A parameter list.  */
+    export class ParameterListLabel  extends AbstractLabel{
         isValid(children:Array<PNode>) {
-            return children.every(function (c:PNode) {
-                return c.isExprNode()
-            });
+            return children.every( (c:PNode) : boolean => c.label() instanceof VarDeclLabel );
         }
 
         strategy : lrStrategy = new lrStrategy();
@@ -713,24 +753,13 @@ module pnode {
             //TODO should the parameter list do anything? I don't think it does - JH
         }
 
-        getClass():PNodeClass {
-            return ExprSeqNode;
-        }
-
         toString():string {
             return "param";
         }
 
         /*private*/
         constructor() {
-        }
-
-        changeValue (newString : string) : Option<Label> {
-            return new None<Label>();
-        }
-
-        getVal() : string {
-            return null;
+            super() ;
         }
 
         select(vms:VMS){
@@ -740,65 +769,87 @@ module pnode {
         // Singleton
         public static theParameterListLabel = new ParameterListLabel();
 
+        isExprNode() { return false ; }
+
+        isExprSeqNode() { return false ; }
+
+        isTypeNode() { return false ; }
+
+        hasDropZonesAt(start : number): boolean { return true; }
+
         public toJSON() : any {
             return { kind:  "ParamLabel" } ; }
 
         public static fromJSON( json : any ) : ParameterListLabel {
             return ParameterListLabel.theParameterListLabel ; }
+
     }
 
-    export abstract class TypeLabel implements Label {
-        isValid:(children:Array<PNode>) => boolean;
+    /** Abstract base class for all type labels.  */
+    export abstract class TypeLabel  extends AbstractLabel {
+
+        abstract isValid(children:Array<PNode>) ;
 
         strategy : nodeStrategy;
 
-        getClass():PNodeClass {
-            return TypeNode;
-        }
-
         /*private*/
         constructor() {
-        }
-
-        changeValue (newString : string) : Option<Label> {
-            return new None<Label>();
-        }
-
-        getVal() : string {
-            return null;
+            super() ;
         }
 
         step( vms : VMS) {
             //TODO not sure yet
         }
 
+        isExprNode() { return false ; }
+
+        isExprSeqNode() { return false ; }
+
+        isTypeNode() { return true ; }
+
         public abstract toJSON() : any ;
     }
 
-    //Variable
+    abstract class ExprLabelWithString extends ExprLabel {
 
-    export class VariableLabel extends ExprLabel {
-        _val : string;
-        strategy:varStrategy = new varStrategy();
+        protected _val : string; 
+        
+        protected _open : boolean ;
 
-        isValid(children:Array<PNode>):boolean {
-            return children.length == 0;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
-        toString():string {
-            return "variable";
+        protected
+        constructor(name : string, open : boolean ) {
+            super() ;
+            this._val = name;
+            this._open = open ;
         }
 
         getVal() : string {
             return this._val;
         }
 
-        changeValue (newString : string) : Option<Label> {
-            var newLabel = new VariableLabel(newString);
+        isOpen() : boolean {
+            return this._open ;
+        }
+    }
+
+    /** References to variables.  */
+    export class VariableLabel extends ExprLabelWithString {
+        strategy:varStrategy = new varStrategy();
+
+        isValid(children:Array<PNode>):boolean {
+            return children.length == 0;
+        }
+
+        toString():string {
+            return " variable["+this._val+"]" ;
+        }
+
+        open() : Option<Label> {
+            return some( new VariableLabel( this._val, true ) ) ;
+        }
+
+        changeString (newString : string) : Option<Label> {
+            const newLabel = new VariableLabel(newString, false);
             return new Some(newLabel);
         }
 
@@ -808,52 +859,44 @@ module pnode {
             evalu.finishStep( v )
         }
 
-        /*private*/
-        constructor(name : string) {
-            super() ;
-            this._val = name;
+        private
+        constructor(name : string, open : boolean ) {
+            super(name, open) ;
         }
 
-        public static theVariableLabel = new VariableLabel("");
-
         public toJSON() : any {
-            return { kind : "VariableLabel", name : this._val } ;
+            return { kind : "VariableLabel", name : this._val, open : this._open } ;
         }
 
         public static fromJSON( json : any ) : VariableLabel {
-            return new VariableLabel( json.name ) ; }
+            return new VariableLabel( json.name, json.open ) ; }
 
     }
 
+    /** Variable declaration nodes. */
     export class VarDeclLabel extends ExprLabel {
-        _val : string ;
+
+        protected _isConst : boolean ;
 
         isValid( children : Array<PNode> ) : boolean {
             if( children.length != 3) return false ;
-            if( ! children[0].isExprNode()) return false ;
+            if( ! (children[0].label() instanceof VariableLabel) ) return false ;
             if( ! children[1].isTypeNode()) return false ;
+            if( ! ( children[2].isExprNode()
+                  || children[2].label() instanceof NoExprLabel) ) return false ;
             return true;
         }
 
         strategy : varDeclStrategy = new varDeclStrategy();
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
             return "vdecl";
         }
 
-        /*private*/
-        constructor(name : string) {
+        private
+        constructor( isConst : boolean ) {
             super() ;
-            this._val = name;
-        }
-
-        changeValue (newString : string ) : Option<Label> {
-            var newLabel = new VarDeclLabel(newString);
-            return new Some(newLabel);
+            this._isConst = isConst ;
         }
 
         nodeStep(node, evalu){
@@ -870,12 +913,8 @@ module pnode {
                 type = Type.ANY;
             }
 
-            var isConst = false; //TODO false for now for testing purposes
-            if (this._val == "true"){
-                isConst = true;
-            } else {
-                isConst = false;
-            }
+            var isConst = this._isConst; //TODO false for now for testing purposes
+
 
             var v = new Field(name.getVal(), value, type, isConst);
 
@@ -884,18 +923,16 @@ module pnode {
             evalu.finishStep( v.getValue() );
         }
 
-        // Singleton
-        public static theVarDeclLabel = new VarDeclLabel("");
-
         public toJSON() : any {
-            return { kind: "VarDeclLabel" } ;
+            return { kind: "VarDeclLabel", isConst: this._isConst } ;
         }
 
         public static fromJSON( json : any ) : VarDeclLabel {
-            return VarDeclLabel.theVarDeclLabel ;
+            return new VarDeclLabel( json._isConst ) ;
         }
     }
 
+    /** Assignments.  */
     export class AssignLabel extends ExprLabel {
         isValid( children : Array<PNode> ) : boolean {
             if( children.length != 2) return false ;
@@ -906,10 +943,6 @@ module pnode {
 
         strategy:assignStrategy = new assignStrategy();
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
             return "assign";
         }
@@ -919,10 +952,6 @@ module pnode {
             super();
         }
 
-        changeValue (newString : string ) : Option<Label> {
-            return new None<Label>();
-        }
-
         nodeStep(node, evalu){
             var leftside = evalu.getPending().concat([0]);
             var rightside = evalu.getPending().concat([1]);
@@ -930,7 +959,7 @@ module pnode {
 
             var lNode = evalu.getRoot().get(leftside);
             //make sure left side is var
-            if(lNode.label().toString() == VariableLabel.theVariableLabel.toString()){
+            if(lNode.label() instanceof VariableLabel ){
                 //if in stack
                 if(evalu.getStack().inStack(lNode.label().getVal())) {
                     evalu.getStack().setField(lNode.label().getVal(), rs);
@@ -959,10 +988,9 @@ module pnode {
     }
 
 
-    //Arithmetic Labels
-    export class CallWorldLabel extends ExprLabel {
-
-        _val : string;//the operation
+    /** Calls to explicitly named functions.
+     * TODO Change the name to something else. */
+    export class CallWorldLabel extends ExprLabelWithString  {
 
         strategy : lrStrategy = new lrStrategy();
 
@@ -970,20 +998,16 @@ module pnode {
             return children.every(function(c : PNode) { return c.isExprNode() } ) ;
         }
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
             return "callWorld";
         }
 
-        getVal() : string {
-            return this._val;
+        open() : Option<Label> {
+            return some( new CallWorldLabel( this._val, true ) ) ;
         }
 
-        changeValue (newString : string) : Option<Label> {
-            var newLabel = new CallWorldLabel(newString);
+        changeString (newString : string) : Option<Label> {
+            const newLabel = new CallWorldLabel(newString, false);
             return new Some(newLabel);
         }
 
@@ -992,14 +1016,11 @@ module pnode {
                var field = evalu.getStack().getField(this._val.toString());
                 if (field.getValue().isBuiltInV()){
                      return  (<BuiltInV> field.getValue()).step(node, evalu);
-               }
-
-                else{
-
-                        var c = <ClosureV>field.getValue;
-                       // if (!c.isClosureV()){}//  error!
-                        var c1 = <ClosureV>c;
-                        var f : LambdaNode = <LambdaNode>c1.function;
+                }
+                else if( field.getValue().isClosureV() ) {
+                        var v : Value = field.getValue() ;
+                        var c : ClosureV = <ClosureV> v ;
+                        var f : PNode = c.getLambdaNode() ;
 
                         //a bunch of pNodes(non parameter children)
                         var argList : Array<Value> = new Array();
@@ -1032,35 +1053,38 @@ module pnode {
                             activationRecord.addField(arFields[k]);
                         }
 
-                        var stack = new execStack(activationRecord);//might have to take a look at how execution stack is made
-                        stack.setNext(c1.context);
+                        var stack = new VarStack(activationRecord, c.getContext());
 
-                        var newEval = new Evaluation(f, null, stack);
+                        var newEval = new Evaluation(f, stack);
                         newEval.setPending([]);
                         vms.stack.push( newEval );
                     }
+                else {
+                    // TODO report error. Field exists but is not a function.
+                }
+            }
+            else {
+                // TODO report error. Field with the name does not exist.
             }
         }
 
-        /*private*/
-        constructor(name : string) {
-            super() ;
-            this._val = name;
+        private
+        constructor(name : string, open : boolean ) {
+            super( name, open ) ;
         }
 
-        public static theCallWorldLabel = new CallWorldLabel("");
-
         public toJSON() : any {
-            return { kind: "CallWorldLabel" , name: this._val } ;
+            return { kind: "CallWorldLabel" , name: this._val, open: this._open } ;
         }
 
         public static fromJSON( json : any ) : CallWorldLabel {
-            return new CallWorldLabel( json.name ) ;
+            return new CallWorldLabel( json.name, json.open ) ;
         }
+    
+        hasDropZonesAt(start : number): boolean { return true; }
     }
 
-    //Placeholder Labels
-
+    /** Place holder nodes for expression. */
     export class ExprPHLabel extends ExprLabel {
 
         isValid( children : Array<PNode> ) : boolean {
@@ -1068,20 +1092,17 @@ module pnode {
             return true;
         }
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
             return "expPH";
         }
 
-        /*private*/
+        private
         constructor() {
             super();
         }
 
-        nodeStep(node, evalu){}//Placeholders don't need to to step
+        // TODO: Stepping a place holder is a run time error.
+        nodeStep(node, evalu){}
 
         // Singleton
         public static theExprPHLabel = new ExprPHLabel();
@@ -1093,9 +1114,15 @@ module pnode {
         public static fromJSON( json : any ) : ExprPHLabel {
             return ExprPHLabel.theExprPHLabel ;
         }
+
+        isPlaceHolder() : boolean { return true; }
+
     }
 
-    export class ExprOptLabel extends ExprLabel {
+    /** This class is for optional expressions where there is no expression.
+     * Not to be confused with the expression place holder ExpPHLabel which is used when an expression is manditory.
+     */
+    export class NoExprLabel extends AbstractLabel {
 
         strategy : LiteralStrategy = new LiteralStrategy();
 
@@ -1104,12 +1131,8 @@ module pnode {
             return true;
         }
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
-            return "expOpt";
+            return "noExpr";
         }
 
         /*private*/
@@ -1117,66 +1140,52 @@ module pnode {
             super();
         }
 
-        nodeStep(node, evalu){
-            //add in a null value to signify that it is null to signify that
-            var v = new StringV("null");
-            evalu.finishStep( v );
+        isExprNode() { return false ; }
 
-        }
+        isExprSeqNode() { return false ; }
+
+        isTypeNode() { return false ; }
+
+        isPlaceHolder() : boolean { return true; }
+
+        step(vms:VMS) : void {} // TODO Get rid of this.
 
         // Singleton
-        public static theExprOptLabel = new ExprOptLabel();
+        public static theNoExprLabel = new NoExprLabel();
 
         public toJSON() : any {
             return { kind: "ExprOptLabel" } ;
         }
 
-        public static fromJSON( json : any ) : ExprOptLabel {
-            return ExprOptLabel.theExprOptLabel ;
+        public static fromJSON( json : any ) : NoExprLabel {
+            return NoExprLabel.theNoExprLabel ;
         }
+
     }
 
+    /** Function (or method) literals. */
     export class LambdaLabel extends ExprLabel {
-
-        _val : string;
         strategy : lambdaStrategy = new lambdaStrategy();
 
         isValid( children : Array<PNode> ) {
              if( children.length != 3 ) return false ;
-             if ( ! children[0].isExprSeqNode() ) return false ;
+             if ( ! (children[0].label() instanceof ParameterListLabel) ) return false ;
              if( ! children[1].isTypeNode() ) return false ;
              if( ! children[2].isExprSeqNode() ) return false ;
              return true;
          }
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
             return "lambda";
         }
 
-
-        changeValue (newString : string) : Option<Label> {
-            var newLabel = new LambdaLabel(newString);
-            return new Some(newLabel);
-        }
-
-        getVal() : string {
-            return this._val;
-        }
-
-        /*private*/
-        constructor(val : string) {
+        private
+        constructor() {
             super();
-            this._val = val;
         }
 
         nodeStep(node, evalu) {
-            var clo = new ClosureV();
-            clo.context = evalu.getStack();//TODO this is the correct stack?
-            clo.function = <LambdaNode> node;
+            var clo = new ClosureV( node, evalu.getStack()) ;//TODO this is the correct stack?
 
 //            var name = <StringV> node.label().getVal();
             var v = new Field(node.label().getVal(), clo, Type.ANY, true);
@@ -1197,7 +1206,7 @@ module pnode {
         }
 
         // Singleton
-        public static theLambdaLabel = new LambdaLabel("");
+        public static theLambdaLabel = new LambdaLabel();
 
         public toJSON() : any {
             return { kind: "LambdaLabel" } ;
@@ -1208,8 +1217,7 @@ module pnode {
         }
     }
 
-    //While and If Labels
-
+    /** If expressions */
     export class IfLabel extends ExprLabel {
 
         strategy:ifStrategy = new ifStrategy();
@@ -1220,10 +1228,6 @@ module pnode {
          if( ! children[1].isExprSeqNode() ) return false ;
          if( ! children[2].isExprSeqNode() ) return false ;
          return true ; }
-
-        getClass():PNodeClass {
-            return ExprNode;
-        }
 
         toString():string {
             return "if";
@@ -1262,6 +1266,7 @@ module pnode {
         }
     }
 
+    /** While loop expressions */
     export class WhileLabel extends ExprLabel {
 
         strategy:whileStrategy = new whileStrategy();
@@ -1271,10 +1276,6 @@ module pnode {
          if( ! children[0].isExprNode() ) return false ;
          if( ! children[1].isExprSeqNode() ) return false ;
          return true ; }
-
-        getClass():PNodeClass {
-            return ExprNode;
-        }
 
         toString():string {
             return "while";
@@ -1303,37 +1304,27 @@ module pnode {
         }
     }
 
-    //Type Labels
+    /** An indication that an optional type lable is not there. */
+    export class NoTypeLabel extends TypeLabel {
+        // TODO: Should this really extend TypeLabel?
 
-    export class NoTypeLabel implements TypeLabel {
+        // TODO:  Note that no selection strategy is needed for this label
         strategy : nodeStrategy;
 
         isValid(children:Array<PNode>):boolean {
             return children.length == 0;}
 
-        getClass():PNodeClass {
-            return TypeNode;
-        }
-
         toString():string {
             return "noType";
         }
-
+    
+        // TODO: No step is needed for this label
         step ( vms : VMS ) {
 
         }
 
-        changeValue (newString : string) : Option<Label> {
-            return new None<Label>();
-        }
-
-        getVal() : string {
-            return null;
-        }
-
         /*private*/
-        constructor() {
-        }
+        constructor() { super() ; }
 
         // Singleton
         public static theNoTypeLabel = new NoTypeLabel();
@@ -1345,141 +1336,123 @@ module pnode {
         public static fromJSON( json : any ) : NoTypeLabel {
             return NoTypeLabel.theNoTypeLabel ;
         }
+
+        isPlaceHolder() : boolean { return true; }
     }
 
-     //Literal Labels
-
-     export class StringLiteralLabel extends ExprLabel {
-        _val : string ;
+    /** String literals. */
+    export class StringLiteralLabel extends ExprLabelWithString {
 
         strategy : LiteralStrategy = new LiteralStrategy();
 
-        constructor( val : string) { super() ; this._val = val ; }
-
-        val() : string { return this._val ; }
+        constructor( val : string, open : boolean) { super(val, open) ; }
 
         isValid( children : Array<PNode> ) {
-        return children.length == 0 ; }
+            return children.length == 0 ; }
 
-        getClass() : PNodeClass { return ExprNode ; }
+        open() : Option<Label> {
+            return some( new StringLiteralLabel( this._val, true ) ) ;
+        }
 
-
-         changeValue (newString : string) : Option<Label> {
-             var newLabel = new StringLiteralLabel(newString);
+        changeString (newString : string) : Option<Label> {
+             const newLabel = new StringLiteralLabel(newString, false);
              return new Some(newLabel);
          }
 
-         getVal() : string {
-             return this._val;
-         }
 
         toString() : string { return "string[" + this._val + "]"  ; }
 
-         public static theStringLiteralLabel = new StringLiteralLabel( "" );
-
-         nodeStep(node, evalu){
+        nodeStep(node, evalu){
              evalu.finishStep( new StringV(this._val) );
          }
 
         public toJSON() : any {
-            return { kind: "StringLiteralLabel", val : this._val } ;
+            return { kind: "StringLiteralLabel", val : this._val, open: this._open } ;
         }
 
         public static fromJSON( json : any ) : StringLiteralLabel {
-            return new StringLiteralLabel( json.val )  ;
+            return new StringLiteralLabel( json.val, json.open )  ;
         }
      }
 
-    export class NumberLiteralLabel extends ExprLabel {
-        _val : string ;
+    /** Number literals. */
+    export class NumberLiteralLabel extends ExprLabelWithString {
 
-        constructor( val : string) { super() ; this._val = val ; }
+        constructor( val : string, open : boolean ) { super( val, open ) ; }
 
         val() : string { return this._val ; }
 
         isValid( children : Array<PNode> ) {
             return children.length == 0 ;
-        //TODO logic to make sure this is a number
         }
 
-        changeValue (newString : string) : Option<Label> {
-            var newLabel = new NumberLiteralLabel(newString);
+        open() : Option<Label> {
+            return some( new NumberLiteralLabel( this._val, true ) ) ;
+        }
+
+        changeString (newString : string) : Option<Label> {
+            const newLabel = new NumberLiteralLabel(newString, false);
             return new Some(newLabel);
         }
 
-        getVal() : string {
-            return this._val ;
-        }
-
-        getClass() : PNodeClass { return ExprNode ; }
-
         toString() : string { return "number[" + this._val + "]"  ; }
 
+        // TODO Stepper should be shared with string literal.
         nodeStep(node, evalu){
 
         }
 
-        public static theNumberLiteralLabel = new NumberLiteralLabel( "" );
-
         public toJSON() : any {
-            return { kind: "NumberLiteralLabel", val : this._val } ;
+            return { kind: "NumberLiteralLabel", val : this._val, open : this._open } ;
         }
 
         public static fromJSON( json : any ) : NumberLiteralLabel {
-            return new NumberLiteralLabel( json.val )  ;
+            return new NumberLiteralLabel( json.val, json.open )  ;
         }
     }
 
-    export class BooleanLiteralLabel extends ExprLabel {
-        _val : string ;
+    /** Boolean literals */
+    export class BooleanLiteralLabel extends ExprLabelWithString {
 
-        constructor( val : string) { super() ; this._val = val ; }
+        constructor( val : string, open : boolean) { super(val, open) ; }
 
-        val() : string { return this._val ; }
 
-        changeValue (newString : string) : Option<Label> {
-                var newLabel = new BooleanLiteralLabel(newString);
+        open() : Option<Label> {
+            return some( new BooleanLiteralLabel( this._val, true ) ) ;
+        }
+
+        changeString (newString : string) : Option<Label> {
+                var newLabel = new BooleanLiteralLabel(newString, false);
                 return new Some(newLabel);
         }
 
         isValid( children : Array<PNode> ) {
             if(children.length != 0){return false}
-            if(this.val() != "true" && this.val() != "false"){return false;}
-            return true;
+            return this._val == "true" || this._val == "false" ;
         }
-
-        getVal() : string {
-            return this._val;
-        }
-
-        getClass() : PNodeClass { return ExprNode ; }
 
         toString() : string { return "boolean[" + this._val + "]"  ; }
 
+        // TODO Stepper should be shared with string literal.
         nodeStep(node, evalu){
 
         }
 
-        // The following line makes no sense.
-        public static theBooleanLiteralLabel = new BooleanLiteralLabel( "" );
-
         public toJSON() : any {
-            return { kind: "BooleanLiteralLabel", val : this._val } ;
+            return { kind: "BooleanLiteralLabel", val : this._val, open : this._open } ;
         }
 
         public static fromJSON( json : any ) : BooleanLiteralLabel {
-            return new BooleanLiteralLabel( json.val )  ;
+            return new BooleanLiteralLabel( json.val, json.open )  ;
         }
     }
 
-
+    /** Null literals. */
     export class NullLiteralLabel extends ExprLabel {
         constructor() { super() ; }
 
         isValid( children : Array<PNode> ) {
             return children.length == 0;}
-
-        getClass() : PNodeClass { return ExprNode ; }
 
         toString() : string { return "null"  ; }
 
@@ -1498,28 +1471,20 @@ module pnode {
         }
     }
 
+    /** Call a function.  */
     export class CallLabel extends ExprLabel {
 
         strategy : lrStrategy = new lrStrategy();
 
 
         isValid(children:Array<PNode>) {
-            //TODO check if child 0 is a method
             return children.every(function (c:PNode) {
                 return c.isExprNode()
             });
         }
 
-        getClass():PNodeClass {
-            return ExprNode;
-        }
-
         toString():string {
             return "call";
-        }
-
-        changeValue (newString : string) : Option<Label> {
-            return new None<Label>();
         }
 
         getVal() : string {
@@ -1531,6 +1496,7 @@ module pnode {
             super() ;
         }
 
+        // TODO Complete this!
         nodeStep(node, evalu, vms){}
 
         // Singleton
@@ -1543,8 +1509,11 @@ module pnode {
         public static fromJSON( json : any ) : CallLabel {
             return CallLabel.theCallLabel ;
         }
+
+        hasDropZonesAt(start : number): boolean { return true; }
     }
 
+    // TODO. Get rid of this and similar labels.
     export class PenLabel extends ExprLabel {
         _val:string; //either up or down
         strategy : TurtleStrategy = new TurtleStrategy();
@@ -1558,7 +1527,7 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             var newLabel = new PenLabel(newString);
             return new Some(newLabel);
         }
@@ -1572,10 +1541,6 @@ module pnode {
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1616,7 +1581,7 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             var newLabel = new ForwardLabel(newString);
             return new Some(newLabel);
         }
@@ -1630,10 +1595,6 @@ module pnode {
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1674,24 +1635,20 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             var newLabel = new RightLabel(newString);
             return new Some(newLabel);
         }
 
         isValid(children:Array<PNode>) {
             if (children.length != 1) {
-                return false
+                return false;
             }
             return true;
         }
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1731,12 +1688,12 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             return new None<Label>();
         }
 
         isValid(children:Array<PNode>) {
-            if (children.length != 1) {
+            if (children.length != 0) {
                 return false
             }
             return true;
@@ -1744,10 +1701,6 @@ module pnode {
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1787,12 +1740,12 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             return new None<Label>();
         }
 
         isValid(children:Array<PNode>) {
-            if (children.length != 1) {
+            if (children.length != 0) {
                 return false
             }
             return true;
@@ -1800,10 +1753,6 @@ module pnode {
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1843,12 +1792,12 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             return new None<Label>();
         }
 
         isValid(children:Array<PNode>) {
-            if (children.length != 1) {
+            if (children.length != 0) {
                 return false
             }
             return true;
@@ -1856,10 +1805,6 @@ module pnode {
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1900,7 +1845,7 @@ module pnode {
             return this._val;
         }
 
-        changeValue(newString:string):Option<Label> {
+        changeString(newString:string):Option<Label> {
             var newLabel = new LeftLabel(newString);
             return new Some(newLabel);
         }
@@ -1914,10 +1859,6 @@ module pnode {
 
         getVal():string {
             return this._val;
-        }
-
-        getClass():PNodeClass {
-            return ExprNode;
         }
 
         toString():string {
@@ -1945,48 +1886,57 @@ module pnode {
         }
     }
 
-    //Placeholder Make
-    export function mkExprPH():ExprNode {
-        return <ExprNode> make(ExprPHLabel.theExprPHLabel, []);
-    }
+    export function mkExprPH():PNode {
+        return  make(ExprPHLabel.theExprPHLabel, []); }
 
-    export function mkExprOpt():ExprNode {
-        return <ExprNode> make(ExprOptLabel.theExprOptLabel, []);
-    }
+    export function mkNoExpNd():PNode {
+        return  make(NoExprLabel.theNoExprLabel, []); }
 
-    //Loop and If Make
-    export function mkIf(guard:ExprNode, thn:ExprSeqNode, els:ExprSeqNode):ExprNode {
-        return <ExprNode> make(IfLabel.theIfLabel, [guard, thn, els]); }
 
-    export function mkWorldCall(left:ExprNode, right:ExprNode):ExprNode {
-        return <ExprNode> make(CallWorldLabel.theCallWorldLabel, [left, right]); }
+    export function mkIf(guard:PNode, thn:PNode, els:PNode):PNode {
+        return make(IfLabel.theIfLabel, [guard, thn, els]); }
 
-    export function mkWhile(cond:ExprNode, seq:ExprSeqNode):ExprNode {
-        return <ExprNode> make(WhileLabel.theWhileLabel, [cond, seq]); }
+    export function mkWorldCall(left:PNode, right:PNode):PNode {
+        return make(new CallWorldLabel("", true), [left, right]); }
 
-    export function mkExprSeq( exprs : Array<ExprNode> ) : ExprSeqNode {
-        return <ExprSeqNode> make( ExprSeqLabel.theExprSeqLabel, exprs ) ; }
-    export function mkParameterList( exprs : Array<ExprNode> ) : ExprSeqNode {
-        return <ExprSeqNode> make( ParameterListLabel.theParameterListLabel, exprs ) ; }
+    export function mkWhile(cond:PNode, seq:PNode):PNode {
+        return make(WhileLabel.theWhileLabel, [cond, seq]); }
 
-    export function mkType() : TypeNode{
-        return <TypeNode> make( new NoTypeLabel(),[] ) ; }
+    export function mkExprSeq( exprs : Array<PNode> ) : PNode {
+        return make( ExprSeqLabel.theExprSeqLabel, exprs ) ; }
 
-    //Const Make
-    export function mkStringLiteral( val : string ) : ExprNode{
-        return <ExprNode> make( new StringLiteralLabel(val),[] ) ; }
+    export function mkCallWorld( name : string, ...args : Array<PNode> ) {
+        return make( new CallWorldLabel( name, true), args ) ; }
+    
+    export function mkCall( ...args : Array<PNode> ) {
+        return make( CallLabel.theCallLabel, args ) ; }
+    
+    export function mkVarDecl( varNode : PNode, ttype : PNode, initExp : PNode ) {
+        return make( new VarDeclLabel(false), [varNode, ttype, initExp ] ) ; }
 
-    export function mkNumberLiteral( val : string ) : ExprNode{
-        return <ExprNode> make( new NumberLiteralLabel(val),[] ) ; }
+    export function mkParameterList( exprs : Array<PNode> ) : PNode {
+        return make( ParameterListLabel.theParameterListLabel, exprs ) ; }
 
-    export function mkBooleanLiteral( val : string ) : ExprNode{
-        return <ExprNode> make( new BooleanLiteralLabel(val),[] ) ; }
+    export function mkNoTypeNd() : PNode {
+        return make( new NoTypeLabel(),[] ) ; }
 
-    export function mkVar( val :string) : ExprNode{
-        return <ExprNode> make (new VariableLabel(val), []) ;}
+    export function mkStringLiteral( val : string ) : PNode{
+        return make( new StringLiteralLabel(val, true),[] ) ; }
 
-    export function mkLambda( val :string, param:ExprSeqNode, type:TypeNode, func : ExprSeqNode) : ExprNode{
-        return <ExprNode> make (new LambdaLabel(val), [param, type, func]) ;}
+    export function mkNumberLiteral( val : string ) : PNode{
+        return make( new NumberLiteralLabel(val, true),[] ) ; }
+
+    export function mkTrueBooleanLiteral() : PNode{
+        return make( new BooleanLiteralLabel("true", false),[] ) ; }
+
+    export function mkFalseBooleanLiteral() : PNode{
+        return make( new BooleanLiteralLabel("false", false),[] ) ; }
+
+    export function mkVar( val :string) : PNode {
+        return make (new VariableLabel(val, true), []) ;}
+
+    export function mkLambda( val :string, param:PNode, type:PNode, func : PNode) : PNode{
+        return make (LambdaLabel.theLambdaLabel, [param, type, func]) ;}
 
 
     // JSON support
@@ -2000,13 +1950,6 @@ module pnode {
         return PNode.fromJSON( json ) ; }
 
     function fromJSONToLabel( json : any ) : Label {
-         // There is probably a reflective way to do this
-         //   Perhaps
-         //       var labelClass = pnode[json.kind] ;
-         //       check that labelClass is not undefined
-         //       var  fromJSON : any => Label = labelClass["fromJSON"] ;
-         //       check that fromJSON is not undefined
-         //       return fromJSON( json ) ;
          var labelClass = pnode[json.kind] ; // This line relies on
              //  (a) the json.kind field being the name of the concrete label class.
              //  (b) that all the concrete label classes are exported from the pnode module.

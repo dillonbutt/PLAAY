@@ -1,3 +1,7 @@
+/** Collection types such as lists. 
+ * 
+ */
+
 module collections {
     export interface Collection<A> {
     
@@ -10,13 +14,17 @@ module collections {
         /** Precondition: !isEmpty() */
         first : () => A ;
         
+        /** Create a collection of the same kind by applying a function to all members of this collection. */
         map : <B> (f : (a:A) => B ) => Collection<B> ;
     }
     
+    /** A collection of 0 or one thing. */
     export interface Option<A> extends Collection<A> {
         choose : <B>( f: (a:A) => B, g : () => B ) => B ;
         map : <B> (f : (a:A) => B ) => Option<B> ;
         bind : <B> (f : (a:A) => Option<B> ) => Option<B> ;
+        orElse : ( that : Option<A> ) => Option<A> ;
+        recoverBy : ( backup : () => Option<A> ) => Option<A> ;
     }
 
     export class Some<A> implements Option<A>{
@@ -38,8 +46,13 @@ module collections {
     
         bind<B>(f : (a:A) => Option<B> ) : Option<B> {
             return f( this._val ) ; }
+    
+        orElse( that : Option<A> ) : Option<A> {
+            return this }
 
         toString() : string { return "Some(" + this._val.toString() + ")" ; }
+
+        recoverBy( backup : () => Option<A> ) : Option<A> { return this ; }
     }
 
     export class None<A> implements Option<A> {
@@ -60,6 +73,11 @@ module collections {
         bind<B>(f : (a:A) => Option<B> ) : Option<B> {
             return new None<B>() ; }
     
+        orElse( that : Option<A> ) : Option<A> {
+            return that }
+
+        recoverBy( backup : () => Option<A> ) : Option<A> { return backup() ; }
+    
         toString() : string { return "None" ; }
     }
 
@@ -69,7 +87,7 @@ module collections {
     export function none<A>() : Option<A> {
         return new None<A>() ; }
     
-    /** Lisp-like lists */
+    /** Lisp-like lists. */
     export abstract class List<A> implements Collection<A> {
         abstract fold<B>( f: (a:A, b:B) => B, g : () => B ) : B ; 
         
@@ -163,8 +181,11 @@ module collections {
 
     export function butLast<A>( xs : List<A> ) : List<A>{
         if( xs.rest().isEmpty() ) return nil<A>() ;
-        else return cons( xs.first(), butLast( xs.rest() ) ) ;
-    }
+        else return cons( xs.first(), butLast( xs.rest() ) ) ; }
+
+    export function last<A>( xs : List<A> ) : A {
+        if( xs.rest().isEmpty() ) return xs.first() ;
+        else return last( xs.rest() ) ;  }
     
 }
 

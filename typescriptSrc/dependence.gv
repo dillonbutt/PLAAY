@@ -1,0 +1,81 @@
+digraph Depends {
+
+   gsize="8,6"; ratio=fill;
+   node[fontsize=8, shape=rectangle];
+
+   //edits -> assert ;
+   //edits -> collections ;
+
+   evaluationManager -> vms ;
+   evaluationManager -> workspace ;
+   evaluationManager -> world ;
+
+   editing -> sharedMkHtml ;
+   editing -> pnodeEdits ;
+   editing -> treeManager ;
+
+   executing -> sharedMkHtml ;
+   executing -> editing ;
+   executing -> evaluationManager ;
+   executing -> seymour ;
+   executing -> vms ;
+
+
+   mkHtml -> createHtmlElements ;
+   mkHtml -> executing ;
+   mkHtml -> editing ;
+   mkHtml -> userRelated ;
+
+   //pageManipulation -> assert ;
+   //pageManipulation -> collections ;
+
+   //playground -> assert ;
+   //playground -> collections ;
+   playground -> pnode ;
+   playground -> pnodeEdits ;
+
+   //pnode -> assert ;
+   //pnode -> collections ;
+   pnode -> stackManager ;
+   pnode -> valueTypes ;
+   pnode -> vms ;
+
+   //pnodeEdits -> assert ;
+   //pnodeEdits -> collections ;
+   pnodeEdits -> edits ;
+   pnodeEdits -> pnode ;
+
+   sharedMkHtml -> pnode ;
+   sharedMkHtml -> pnodeEdits ;
+
+   //treeManager -> asssert ;
+   //treeManager -> collections ;
+   treeManager -> edits ;
+   treeManager -> pnode ;
+   treeManager -> pnodeEdits ;
+
+   userRelated -> editing ;
+   userRelated -> pnodeEdits ;
+   userRelated -> pnode ;
+   userRelated -> sharedMkHtml ;
+   
+   //turtleTest -> seymour ;
+
+   //valueTypes -> assert ;
+   //valueTypes -> collections ;
+   valueTypes -> pnode ;
+   valueTypes -> vms ;
+
+   //vms -> assert ;
+   //vms -> collections ;
+   vms -> pnode ;
+
+   workspace -> world ;
+
+   //world -> assert ;
+   //world -> collections ;
+   world -> pnode ;
+   world -> seymour ;
+   world -> valueTypes ;
+   world -> vms ;
+}

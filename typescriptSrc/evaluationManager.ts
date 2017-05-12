@@ -1,11 +1,21 @@
-import evaluation = require( './evaluation' ) ;
+/// <reference path="assert.ts" />
+/// <reference path="pnode.ts" />
+/// <reference path="seymour.ts" />
+/// <reference path="vms.ts" />
+/// <reference path="workspace.ts" />
+/// <reference path="world.ts" />
+
+
+import assert = require('./assert') ;
 import pnode = require('./pnode') ;
+import seymour = require('./seymour') ;
 import vms = require('./vms') ;
 import workspace = require('./workspace') ;
+import world = require('./world') ;
 
 module evaluationManager {
 
-    import Evaluation = evaluation.Evaluation;
+    import Evaluation = vms.Evaluation;
     import PNode = pnode.PNode;
     import VMS = vms.VMS;
     import Workspace = workspace.Workspace;
@@ -15,23 +25,29 @@ module evaluationManager {
         private _vms : VMS;
         private workspace : Workspace;
 
-        constructor(){
+        constructor() {
             this.workspace = new Workspace();
         }
 
-        PLAAY(root : PNode, worlddecl : string) : VMS {
+        initialize(root : PNode, turtleWorld : seymour.TurtleWorld ) : void {
             var worlds = new Array();
             worlds.push(this.workspace.getWorld());
-            if (worlddecl == "turtle"){
-                worlds.push(this.workspace.getTurtleWorld());
+            if (turtleWorld !=  null ) {
+                worlds.push( new world.TurtleWorldObject( turtleWorld ) ) ;
             }
             this._vms = new VMS(root, worlds);
-            return this._vms;
         }
 
-        next() : VMS {
+        next() : void {
             this._vms.advance();
-            return this._vms;
+        }
+
+        getVMS() : VMS {
+            return this._vms ;
+        }
+
+        getTopEvaluation() : Evaluation {
+            return this._vms.getEval() ;
         }
 
     }

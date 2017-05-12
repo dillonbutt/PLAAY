@@ -4,8 +4,10 @@
   "description": "The plaay web IDE.",
   "main": "mkHTML.js",
   "scripts": {
-    "pretest" : "tsc test/*.ts --module commonjs",
-    "test": "mocha"
+    "pretest" : "tsc *.ts test/*.ts --module commonjs",
+    "test": "mocha",
+    "preinstall": "tsc && browserify --debug -o out.js -s mkHTML mkHTML.js",
+    "doc": "typedoc --mode file --excludePrivate --out ../doc/ ."
   },
   "author": "",
   "license": "Copyright of the developers"
